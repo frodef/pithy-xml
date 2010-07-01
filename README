@@ -1,19 +1,23 @@
-Read and write XML as lisp objects. Syntax somewhat similar to that of CL-WHO.
+Read and write XML as lisp objects. Syntax somewhat similar to that of
+CL-WHO.
 
-Disregarding interning (see below), an XML element <foo a=1>...</foo> is represented in either
-of two ways:
+Disregarding interning (see below), an XML element <foo a=1>...</foo>
+is represented in either of two ways:
 
   (:foo :a 1 ...)  or  ((:foo :a 1) ...)
 
-READ-XML will always return the latter form, because it is more consistent for processing. The
-former is perhaps more convenient to write: the element's content starts with the first
+READ-XML will always return the latter form, because it is more
+consistent for processing. The former is perhaps more convenient to
+write: the element's content starts with the first
 non-keyword/value-pair.
 
-Tag names etc. are mapped to (and from) lisp symbols. XML namespaces are represented as lisp
-packages, into which symbols are interned. Note that XML namespaces are named by (globally
-unique) URLs, although you'll probably find it convenient to provide short-hand names (see
-DEFINE-XML-NAMESPACE). Read/print-xml will keep track of namespace bindings. In the following
-example, the same "foo" is referenced in the two XML fragments, using first "qualified names"
+Tag names etc. are mapped to (and from) lisp symbols. XML namespaces
+are represented as lisp packages, into which symbols are
+interned. Note that XML namespaces are named by (globally unique)
+URLs, although you'll probably find it convenient to provide
+short-hand names (see DEFINE-XML-NAMESPACE). Read/print-xml will keep
+track of namespace bindings. In the following example, the same "foo"
+is referenced in the two XML fragments, using first "qualified names"
 and second "namespace defaulting":
 
 > (equal (cdr (read-xml "<bar xmlns:nn='http://blah'><nn:foo>42</nn:foo></bar>"))
@@ -23,8 +27,8 @@ and second "namespace defaulting":
 => T
 
 
-XML comments are represented as (pithy-xml:xml-comment "text"). If you don't care about XML
-namespaces, use keywords. For example:
+XML comments are represented as (pithy-xml:xml-comment "text"). If you
+don't care about XML namespaces, use keywords. For example:
 
 PITHY-XML> (read-xml (print (print-xml '(:element :attribute 1 (:sub-element 42)))))
 "<Element attribute='1'>
