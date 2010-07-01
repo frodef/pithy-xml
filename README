@@ -43,3 +43,7 @@ Here's an example of using DEFINE-XML-NAMESPACE-BY-SCHEMA:
     (:acronyms "HMAC" "SKI" "CRL" "PGP" "SPKI" "DSA" "RSA" "ID")
     (:documentation "http://www.w3.org/TR/xmldsig-core/"))
 
+
+Pithy-XML does not support all features of XML. There are various
+issues with defining entities, CDATA, etc that I've yet to have use
+for, and therefore have not implemented. Feel free to improve on this.
