@@ -36,28 +36,7 @@
 ;;; => (((:ELEMENT :ATTRIBUTE "1") ((:SUB-ELEMENT) "42")))
 ;;;
 
-(defpackage pithy-xml
-    (:use :common-lisp)
-  (:export #:print-xml
-	   #:read-xml
-	   #:read-xml-document
-	   #:read-xml-file
-	   #:camel
-	   #:entity
-	   #:xml-comment
-	   #:*xml-entities*
-	   #:*namespace-bindings*
-	   #:*make-xml-namespace*
-	   #:*xml-acronyms*
-	   #:*default-set-external-format*
-	   #:xml-intern
-	   #:parse-xml-element
-	   #:map-elements
-	   #:find-descendant
-	   #:define-xml-namespace
-	   #:define-xml-namespace-by-schema
-	   #:xml-element ; type-specifier
-	   ))
+
 
 (in-package pithy-xml)
 
@@ -67,6 +46,9 @@
 
 (defvar *unknown-package-is-default-namespace-p* t
   "When encountering an unknown package, map to default namespace?")
+
+(defvar *print-attributes-capitalized-p* nil
+  "Whether attribute names are capitalized or not.")
 
 (defvar *intern-unknown-symbols* t
   "When encountering a symbol that doesn't already exist in the namespace, and LOCK us undefined for
@@ -84,7 +66,11 @@ namespace prefix. If :PACKAGE-NAME, use the package's name as namespace prefix."
     ("xmlns" . pithy-xml.xmlns))
   "The active mappings from qualifiers to namespaces.")
 
-(defvar *default-namespace* :keyword)
+(defvar *default-namespace* :keyword
+  "The namespace to use when none is specified.")
+
+(defvar *default-attribute-namespace* :keyword
+  "Default namespace does not apply to attributes. Use this namespace instead.")
 
 (defvar *make-xml-namespace* (lambda (name)
 			       (cerror "Make package for XML namespace ~S."
@@ -331,61 +317,63 @@ newline and indentation. The syntax is approximately like that of CL-WHO."
 	  ((cons (eql xml-comment))
 	     (format stream "<!-- ~A -->" (cadr sexpr)))
 	  (list
-	     (multiple-value-bind (element attributes contents)
-		 (let ((head (pop sexpr)))
-		   (if (listp head)
-		       (values (car head)
-			       (cdr head)
-			       sexpr)
-		       (values head
-			       (loop while (and sexpr
-						(symbolp (car sexpr))
-						(not (null (car sexpr))))
-				     collect (pop sexpr)
-				     collect (pop sexpr))
-			       sexpr)))
-	       (loop for (k v) on attributes by #'cddr
-		     do (when (member k '(:xmlns pithy-xml.xmlns:xmlns))
-			  (setf *default-namespace*
-				(or (find-package v)
-				    (error "Can't default to nonexisting namespace ~S." v))))
-			(when (eq (symbol-package k)
-				  (find-package 'pithy-xml.xmlns))
-			  (push (cons (symbol-name k)
-				      (or (find-package v)
-					  (find-package (funcall *make-xml-namespace* v))
-					  (error "Can't bind ~S to nonexisting namespace ~S." (symbol-name k) v)))
-				*namespace-bindings*)))
-	       (cond
-		 ((null contents)
-		  (indent)
-		  (let ((terminator (if (char= #\? (char (string element) 0))
-					#\?
-					#\/)))
-		    (format stream "<~/pithy-xml:camel/~{ ~@/pithy-xml:camel/='~/pithy-xml:entity/'~}~C>"
-			    element
-			    attributes
-			    terminator))
-		  t)
-		 (t
-		  (indent)
-		  (format stream "<~/pithy-xml:camel/~{ ~@/pithy-xml:camel/='~/pithy-xml:entity/'~}>"
+	   (multiple-value-bind (element attributes contents)
+	       (let ((head (pop sexpr)))
+		 (if (listp head)
+		     (values (car head)
+			     (cdr head)
+			     sexpr)
+		     (values head
+			     (loop while (and sexpr
+					      (symbolp (car sexpr))
+					      (not (null (car sexpr))))
+				   collect (pop sexpr)
+				   collect (pop sexpr))
+			     sexpr)))
+	     (loop for (k v) on attributes by #'cddr
+		   do (when (member k '(:xmlns pithy-xml.xmlns:xmlns))
+			(setf *default-namespace*
+			      (or (find-package v)
+				  (error "Can't default to nonexisting namespace ~S." v))))
+		      (when (eq (symbol-package k)
+				(find-package 'pithy-xml.xmlns))
+			(push (cons (symbol-name k)
+				    (or (find-package v)
+					(find-package (funcall *make-xml-namespace* v))
+					(error "Can't bind ~S to nonexisting namespace ~S." (symbol-name k) v)))
+			      *namespace-bindings*)))
+	     (cond
+	       ((null contents)
+		(indent)
+		(let ((terminator (if (char= #\? (char (string element) 0))
+				      #\?
+				      #\/)))
+		  (format stream (if *print-attributes-capitalized-p*
+				     "<~/pithy-xml:camel/~{ ~/pithy-xml:camel/='~/pithy-xml:entity/'~}~C>"
+				     "<~/pithy-xml:camel/~{ ~@/pithy-xml:camel/='~/pithy-xml:entity/'~}~C>")
 			  element
-			  attributes)
-		  (let ((newlined-p nil))
-		    (mapc (lambda (sub-sexpr)
-			    (setf newlined-p
-				  (or (print-xml sub-sexpr
-						 :stream stream
-						 :indent-level (1+ indent-level)
-						 :indentation indentation)
-				      newlined-p)))
-			  contents)
-		    (when newlined-p
-		      (indent))
-		    (format stream "</~/pithy-xml:camel/>"
-			    element)
-		    t)))))))))
+			  attributes
+			  terminator))
+		t)
+	       (t
+		(indent)
+		(format stream "<~/pithy-xml:camel/~{ ~@/pithy-xml:camel/='~/pithy-xml:entity/'~}>"
+			element
+			attributes)
+		(let ((newlined-p nil))
+		  (mapc (lambda (sub-sexpr)
+			  (setf newlined-p
+				(or (print-xml sub-sexpr
+					       :stream stream
+					       :indent-level (1+ indent-level)
+					       :indentation indentation)
+				    newlined-p)))
+			contents)
+		  (when newlined-p
+		    (indent))
+		  (format stream "</~/pithy-xml:camel/>"
+			  element)
+		  t)))))))))
 
 (defun xml-intern (string &key stringp)
   "Decamelize, intern, etc. STRING into a symbol, or just the string if STRINGP is true."
@@ -647,7 +635,7 @@ document."
 				;; "Default namespace declarations do not apply directly to attribute names; the interpretation of
 				;; unprefixed attributes is determined by the element on which they appear."
 				;; http://www.w3.org/TR/xml-names/#defaulting
-				(list (let ((*default-namespace* :keyword))
+				(list (let ((*default-namespace* (find-namespace *default-attribute-namespace*)))
 					(xml-intern attribute-name))
 				      value))))
 	     (read-process-instruction ()
