@@ -41,14 +41,17 @@
 (in-package pithy-xml)
 
 (defvar *namespace-plists*
-  (make-hash-table :test #'eq)
+  (make-hash-table :test #'equal)
   "Properties for each namespace/package.")
 
 (defvar *unknown-package-is-default-namespace-p* t
   "When encountering an unknown package, map to default namespace?")
 
-(defvar *print-attributes-capitalized-p* nil
-  "Whether attribute names are capitalized or not.")
+(defvar *print-case-mode* :camel-case
+  "How to print symbols to XML.")
+
+(defvar *print-attributes-case-mode* nil
+  "Possibly override *PRINT-CASE-MODE* for attribute names.")
 
 (defvar *intern-unknown-symbols* t
   "When encountering a symbol that doesn't already exist in the namespace, and LOCK us undefined for
@@ -58,8 +61,9 @@
   "Function to be called to set a STREAM's EXTERNAL-FORMAT.")
 
 (defvar *print-no-namespace-binding* nil
-  "What to do when printing a symbol and there is no current binding for the namespace?  If NIL, fail. If T, print name without
-namespace prefix. If :PACKAGE-NAME, use the package's name as namespace prefix.")
+  "What to do when printing a symbol and there is no current binding for the namespace?  If NIL,
+fail. If T, print name without namespace prefix. If :PACKAGE-NAME, use the package's name as
+namespace prefix.")
 
 (defvar *namespace-bindings*
   '(("xml" . pithy-xml.xml)
@@ -97,18 +101,28 @@ automatically be interned for this package/namespace by READ-XML."
   `(progn
      (defpackage ,name (:use)
        (:nicknames ,url ,@(cdr (assoc :nicknames options)))
-       ,@(set-difference options '((:nicknames) (:acronyms) (:lock))
+       ,@(set-difference options '((:nicknames) (:acronyms) (:lock) (:case-mode) (:attributes-case-mode))
 			 :key #'car))
-     ,(let ((acronyms (assoc :acronyms options)))
+     ,@(let ((acronyms (assoc :acronyms options)))
 	(when acronyms
-	  `(setf (getf (gethash (find-package ',name) *namespace-plists*)
+	  `((setf (getf (gethash (string ',name) *namespace-plists*)
 		       'acronyms)
-		 ',(mapcar #'string (cdr acronyms)))))
-     ,(let ((lock (assoc :lock options)))
+		 ',(mapcar #'string (cdr acronyms))))))
+     ,@(let ((lock (assoc :lock options)))
 	(when lock
-	  `(setf (getf (gethash (find-package ',name) *namespace-plists*)
+	  `((setf (getf (gethash (string ',name) *namespace-plists*)
 		       'lock)
-		 ',(cadr lock))))
+		 ',(cadr lock)))))
+     ,@(let ((case-mode (assoc :case-mode options)))
+	(when case-mode
+	  `((setf (getf (gethash (string ',name) *namespace-plists*)
+			'case-mode)
+		  ',(cadr case-mode)))))
+     ,@(let ((attr-case-mode (assoc :attributes-case-mode options)))
+	(when attr-case-mode
+	  `((setf (getf (gethash (string ',name) *namespace-plists*)
+			'attributes-case-mode)
+		  ',(cadr attr-case-mode)))))
      ',name))
 
 (defmacro define-xml-namespace-by-schema (name url schema-path &rest options)
@@ -126,13 +140,15 @@ automatically be interned for this package/namespace by READ-XML."
 
 (define-xml-namespace pithy-xml.xml
     "http://www.w3.org/XML/1998/namespace"
-  (:documentation "http://www.w3.org/TR/REC-xml-names/"))
+  (:documentation "http://www.w3.org/TR/REC-xml-names/")
+  (:export #:space))
 
 (define-xml-namespace #:xmlns "http://www.w3.org/2000/xmlns/"
   (:nicknames pithy-xml.xmlns)
   (:documentation "http://www.w3.org/TR/REC-xml-names/")
   (:export #:xmlns)
-  (:lock nil))
+  (:lock nil)
+  (:case-mode :camel-case))
 
 (define-xml-namespace xml-schema "http://www.w3.org/2001/XMLSchema"
   (:nicknames #:xsd)
@@ -202,6 +218,16 @@ automatically be interned for this package/namespace by READ-XML."
   "An XML comment."
   '(xml-element xml-comment))
 
+(defun symbol-namespace-property (symbol property)
+  (check-type symbol symbol)
+  (getf (gethash (etypecase symbol
+		   (keyword
+		    (package-name *default-namespace*))
+		   (symbol
+		    (package-name (symbol-package symbol))))
+		 *namespace-plists*)
+	property))
+
 (defun camel (stream string &optional colon at)
   "Convert a hyphenated-name to CamelCase, unless it already
 is. Encode XML entities. Convert '%' to ':'."
@@ -209,7 +235,7 @@ is. Encode XML entities. Convert '%' to ':'."
       (with-output-to-string (stream)
 	(camel stream string colon at))
       (cond
-	((eq 'xmlns:xmlns string)
+	((member string '(xmlns:xmlns :xmlns))
 	 (write-string "xmlns" stream))
 	((symbolp string)
 	 (unless (or (keywordp string)
@@ -233,44 +259,54 @@ is. Encode XML entities. Convert '%' to ':'."
 	       (t (error "Unknown namespace for ~A: ~A."
 			 string
 			 (package-name (symbol-package string)))))))
-	 (let ((*xml-acronyms* (getf (gethash (symbol-package string)
-					      *namespace-plists*)
-				     'acronyms
-				     *xml-acronyms*)))
+	 (let ((*xml-acronyms* (append (symbol-namespace-property string 'acronyms)
+				       *xml-acronyms*))
+	       (at (ecase (symbol-namespace-property string (if at
+								'attributes-case-mode
+								'case-mode))
+		     ((:camel-case) t)
+		     ((:pascal-case) nil)
+		     ((nil) at))))
 	   (camel stream (symbol-name string) colon at)))
 	(t (let ((string (string string)))
-	     (if (find-if (lambda (c)
-			    (char/= c (char-upcase c)))
-			  string)
-		 (write-string (substitute #\: #\% string)
-			       stream)
-		 (loop with uppity = (unless (find #\% string)
-				       (not at))
-		       for i = 0 then (1+ i)
-		       while (< i (length string))
-		       do (let* ((c (char string i))
-				 (entity (assoc c *xml-entities*)))
-			    (cond
-			      (entity
-			       (format stream "~&~A;" (cdr entity)))
-			      (uppity
-			       (dolist (acronym *xml-acronyms*
-					(write-char (char-upcase c) stream)) ; acronym not found here.
-				 (let ((mismatch (mismatch acronym string
-							   :start2 i
-							   :test #'char-equal)))
-				   (when (or (not mismatch)
-					     (and (= mismatch (length acronym))
-						  (char= #\- (char string (+ i mismatch)))))
-				     (write-string acronym stream)
-				     (incf i (1- (length acronym)))
-				     (return))))
-			       (setf uppity nil))
-			      ((char= c #\-)
-			       (setf uppity t))
-			      ((char= c #\%)
-			       (write-char #\: stream))
-			      (t (write-char (char-downcase c) stream)))))))))))
+	     (cond
+	       ((find-if (lambda (c)
+			   (char/= c (char-upcase c)))
+			 string)
+		(write-string (substitute #\: #\% string)
+			      stream))
+	       ((find (remove #\- string) *xml-acronyms*
+		      :test #'string-equal)
+		(write-string (find (remove #\- string) *xml-acronyms*
+				    :test #'string-equal)
+			      stream))
+	       (t (loop with uppity = (unless (find #\% string)
+					(not at))
+			for i = 0 then (1+ i)
+			while (< i (length string))
+			do (let* ((c (char string i))
+				  (entity (assoc c *xml-entities*)))
+			     (cond
+			       (entity
+				(format stream "~&~A;" (cdr entity)))
+			       (uppity
+				(dolist (acronym *xml-acronyms*
+						 (write-char (char-upcase c) stream)) ; acronym not found here.
+				  (let ((mismatch (mismatch acronym string
+							    :start2 i
+							    :test #'char-equal)))
+				    (when (or (not mismatch)
+					      (and (= mismatch (length acronym))
+						   (char= #\- (char string (+ i mismatch)))))
+				      (write-string acronym stream)
+				      (incf i (1- (length acronym)))
+				      (return))))
+				(setf uppity nil))
+			       ((char= c #\-)
+				(setf uppity t))
+			       ((char= c #\%)
+				(write-char #\: stream))
+			       (t (write-char (char-downcase c) stream))))))))))))
 
 (defun entity (stream content &optional colon at)
   "Print CONTENT to STREAM, encoding characters with XML entities according to *XML-ENTITIES*."
@@ -348,18 +384,49 @@ newline and indentation. The syntax is approximately like that of CL-WHO."
 		(let ((terminator (if (char= #\? (char (string element) 0))
 				      #\?
 				      #\/)))
-		  (format stream (if *print-attributes-capitalized-p*
-				     "<~/pithy-xml:camel/~{ ~/pithy-xml:camel/='~/pithy-xml:entity/'~}~C>"
-				     "<~/pithy-xml:camel/~{ ~@/pithy-xml:camel/='~/pithy-xml:entity/'~}~C>")
-			  element
-			  attributes
-			  terminator))
+		  (format stream (ecase (or (symbol-namespace-property element 'case-mode)
+					    *print-case-mode*)
+				   ((:pascal-case)
+				    "<~/pithy-xml:camel/")
+				   ((:camel-case)
+				    "<~@/pithy-xml:camel/"))
+			  element)
+		  (let ((*xml-acronyms* (append (symbol-namespace-property element 'acronyms)
+						*xml-acronyms*)))
+		    (format stream (ecase (or (symbol-namespace-property element 'attributes-case-mode)
+					      (symbol-namespace-property element 'case-mode)
+					      *print-attributes-case-mode*
+					      *print-case-mode*)
+				     ((:pascal-case)
+				      "~{ ~/pithy-xml:camel/=\"~/pithy-xml:entity/\"~}~C>")
+				     ((:camel-case)
+				      "~{ ~@/pithy-xml:camel/=\"~/pithy-xml:entity/\"~}~C>"))
+			    attributes
+			    terminator)))
 		t)
 	       (t
 		(indent)
-		(format stream "<~/pithy-xml:camel/~{ ~@/pithy-xml:camel/='~/pithy-xml:entity/'~}>"
-			element
-			attributes)
+		(format stream (ecase (or (symbol-namespace-property element 'case-mode)
+					  *print-case-mode*)
+				 ((:pascal-case)
+				  "<~/pithy-xml:camel/")
+				 ((:camel-case)
+				  "<~@/pithy-xml:camel/"))
+			element)
+		(let ((*xml-acronyms* (append (symbol-namespace-property element 'acronyms)
+					      *xml-acronyms*)))
+		  (format stream (ecase (or (symbol-namespace-property element 'attributes-case-mode)
+					    (symbol-namespace-property element 'case-mode)
+					    *print-attributes-case-mode*
+					    *print-case-mode*)
+				   ((:pascal-case)
+				    "~{ ~/pithy-xml:camel/=\"~/pithy-xml:entity/\"~}>")
+				   ((:camel-case)
+				    "~{ ~@/pithy-xml:camel/=\"~/pithy-xml:entity/\"~}>"))
+			  attributes))
+		#+ignore (format stream "<~/pithy-xml:camel/~{ ~@/pithy-xml:camel/='~/pithy-xml:entity/'~}>"
+				 element
+				 attributes)
 		(let ((newlined-p nil))
 		  (mapc (lambda (sub-sexpr)
 			  (setf newlined-p
@@ -371,7 +438,12 @@ newline and indentation. The syntax is approximately like that of CL-WHO."
 			contents)
 		  (when newlined-p
 		    (indent))
-		  (format stream "</~/pithy-xml:camel/>"
+		  (format stream (ecase (or (symbol-namespace-property element 'case-mode)
+					    *print-case-mode*)
+				   ((:pascal-case)
+				    "</~/pithy-xml:camel/>")
+				   ((:camel-case)
+				    "</~@/pithy-xml:camel/>"))
 			  element)
 		  t)))))))))
 
@@ -406,15 +478,17 @@ newline and indentation. The syntax is approximately like that of CL-WHO."
 			   (setf previous-decamelized-p t)))
 			(write-char (char-upcase c) name)))
 		 finally (return name))))
-       (ex-intern (string package)
-	 (if (not package)
+       (ex-intern (string package*)
+	 (if (not package*)
 	     (make-symbol (decamelize string))
-	     (let* ((package (find-package package))
+	     (let* ((package (or (find-package package*)
+				 (error "No such package: ~S" package*)))
 		    (*xml-acronyms* (getf (gethash package *namespace-plists*)
 					  'acronyms
 					  *xml-acronyms*))
 		    (decamel (decamelize string))
-		    (symbol (or (find-symbol decamel package)
+		    (symbol (or (find-symbol decamel (or package
+							 (error "no pack: ~S ~S" string package*)))
 				(when (getf (gethash package *namespace-plists*)
 					    'lock
 					    (not *intern-unknown-symbols*))
@@ -652,7 +726,7 @@ document."
 		   (t (prog1
 			  (list process-instruction (read-token :terminator #\?))
 			(read-char-no-whitespace))))))
-	     (read-contents (start-tag &key (multiple-p t) path terminator)
+	     (read-contents (start-tag &key (multiple-p t) path terminator preserve-whitespace-p)
 	       (let* ((content-string
 		       nil)
 		      (sub-elements
@@ -699,8 +773,10 @@ document."
 				    (loop-finish)))))
 		 (or sub-elements
 		     (when content-string
-		       (list (string-trim whitespace
-					  (get-output-stream-string content-string)))))))
+		       (list (if preserve-whitespace-p
+				 (get-output-stream-string content-string)
+				 (string-trim whitespace
+					      (get-output-stream-string content-string))))))))
 	     (read-cdata ()
 	       (with-output-to-string (cdata)
 		 (loop with c0 = (read-char stream)
@@ -749,7 +825,9 @@ document."
 			  ((getf attributes 'empty-element)
 			   (remf attributes 'empty-element)
 			   (list* tag attributes))
-			  (t (let ((contents (read-contents start-tag :path (cons tag path))))
+			  (t (let ((contents (read-contents start-tag
+							    :path (cons tag path)
+							    :preserve-whitespace-p (equal "preserve" (getf attributes 'pithy-xml.xml:space)))))
 			       (if (null attributes)
 				   (list* tag contents)
 				   (list* (list* tag attributes)
@@ -775,6 +853,51 @@ document."
 			       collect (pop element)
 			       collect (pop element))))
 	 (values element attributes name)))))
+
+(defun xml-element (element)
+  (etypecase element
+    ((cons (cons symbol))
+     (caar element))
+    ((cons symbol)
+     (car element))))
+
+(defun xml-content (element)
+  (etypecase element
+    ((cons (cons symbol))
+     (cdr element))
+    ((cons symbol)
+     (pop element)
+     (loop while (and element (symbolp (car element)))
+	   do (pop element)
+	      (pop element))
+     element)))
+
+(defun xml-attributes (element)
+  (etypecase element
+    ((cons (cons symbol))
+     (cdar element))
+    ((cons symbol)
+     (pop element)
+     (loop while (and element (symbolp (car element)))
+	   collect (pop element)
+	   collect (pop element)))))
+
+(defun xml-canonical (element &optional (recusive-p t))
+  (typecase element
+    ((cons (cons symbol))
+     (if (not recusive-p)
+	 element
+	 (list* (car element)
+		(mapcar #'xml-canonical (cdr element)))))
+    ((cons symbol)
+     (multiple-value-bind (content attributes name)
+	 (parse-xml-element element)
+       (list* (list* name attributes)
+	      (if (not recusive-p)
+		  content
+		  (mapcar #'xml-canonical content)))))
+    (t element)))
+
 
 (defun find-descendant (parent &rest path)
   "Locate a descendant of PARENT according to PATH. Each path element either names the child element, or is an integer child index."
