@@ -930,7 +930,7 @@ document."
 						(string= name expect-namespace))
 				      (warn "Unkown namespace in schema: ~S" name))
 				    nil)))
-	(parse-xml-element (first (print (read-xml-file path :type '(xml-element xsd:schema))))))
+	(parse-xml-element (first (read-xml-file path :type '(xml-element xsd:schema)))))
     (let ((target-namespace (getf schema-attributes :target-namespace)))
       (cond
 	((not target-namespace)
