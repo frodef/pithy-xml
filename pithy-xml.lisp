@@ -138,6 +138,21 @@ automatically be interned for this package/namespace by READ-XML."
      ,@(set-difference options '((:export) (:lock))
 		       :key #'car)))
 
+(defmacro define-exact-xml-namespace-by-schema (name url schema-path &rest options)
+  "Declare a namespace by reading symbols from an XML schema file. Defaults :LOCK to true."
+  `(define-xml-namespace ,name ,url
+     (:export ,@(let ((*xml-acronyms* (cdr (or (assoc :acronyms options)
+					       (cons :default *xml-acronyms*)))))
+		  (read-schema-symbols schema-path
+				       :expect-namespace url))
+	      ,@(cdr (assoc :export options)))
+     (:acronyms ,@(nth-value 1 (read-schema-symbols schema-path
+						    :expect-namespace url)))
+     ,(or (assoc :lock options)
+	  '(:lock t))
+     ,@(set-difference options '((:export) (:lock))
+		       :key #'car)))
+
 (define-xml-namespace pithy-xml.xml
     "http://www.w3.org/XML/1998/namespace"
   (:documentation "http://www.w3.org/TR/REC-xml-names/")
@@ -343,9 +358,17 @@ newline and indentation. The syntax is approximately like that of CL-WHO."
 		       do (write-char #\space stream)))))
 	(etypecase sexpr
 	  (null
-	     nil)
+	   nil)
+	  (symbol
+	   (format stream (ecase (or (symbol-namespace-property sexpr 'case-mode)
+				     *print-case-mode*)
+			    ((:pascal-case)
+			     "~/pithy-xml:camel/")
+			    ((:camel-case)
+			     "~@/pithy-xml:camel/"))
+		   sexpr))
 	  ((or string symbol)
-	     (entity stream sexpr)
+	   (entity stream sexpr)
 	     nil)
 	  (integer
 	     (format stream "~D" sexpr)
@@ -941,15 +964,19 @@ document."
 		  expect-namespace
 		  target-namespace)))
       (let ((*default-namespace* target-namespace)
-	    (collector nil))
+	    (collect-interned nil)
+	    (collect-symbols nil))
 	(dolist (element schema)
 	  (map-elements (lambda (name attributes contents)
 			  (declare (ignore contents))
 			  (when (eq name 'xsd:element)
 			    (let ((symbol (getf attributes :name)))
 			      (when symbol
+				(pushnew symbol
+					 collect-symbols)
 				(pushnew (xml-intern symbol :stringp t)
-					 collector))))
+					 collect-interned))))
 			  t)
 			element))
-	(reverse collector)))))
+	(values (reverse collect-interned)
+		(reverse collect-symbols))))))
