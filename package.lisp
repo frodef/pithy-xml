@@ -20,5 +20,9 @@
 	   #:find-descendant
 	   #:define-xml-namespace
 	   #:define-xml-namespace-by-schema
+	   #:define-exact-xml-namespace-by-schema
 	   #:xml-element ; type-specifier
+	   #:xml-content
+	   #:xml-attributes
+	   #:xml-canonical
 	   ))
