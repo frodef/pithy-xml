@@ -683,7 +683,7 @@ document."
 		 (loop for c = (read-char stream)
 		       do (cond
 			    ((member c unexpected)
-			     (error "Unexpected XML character ~S~@[, expected ~S~]." c (or terminator terminators)))
+			     (cerror "Ignore unexpected XML character" "Unexpected XML character ~S~@[, expected ~S~]." c (or terminator terminators)))
 			    ((member c whitespace)
 			     (when terminator
 			       (loop for d = (read-char stream)
