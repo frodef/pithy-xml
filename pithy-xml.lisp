@@ -423,7 +423,9 @@ newline and indentation. The syntax is approximately like that of CL-WHO."
 				     ((:pascal-case)
 				      "~{ ~/pithy-xml:camel/=\"~/pithy-xml:entity/\"~}~C>")
 				     ((:camel-case)
-				      "~{ ~@/pithy-xml:camel/=\"~/pithy-xml:entity/\"~}~C>"))
+				      "~{ ~@/pithy-xml:camel/=\"~/pithy-xml:entity/\"~}~C>")
+				     ((:downcase)
+				      "~{ ~(~A~)=\"~/pithy-xml:entity/\"~}~C>"))
 			    attributes
 			    terminator)))
 		t)
@@ -445,7 +447,9 @@ newline and indentation. The syntax is approximately like that of CL-WHO."
 				   ((:pascal-case)
 				    "~{ ~/pithy-xml:camel/=\"~/pithy-xml:entity/\"~}>")
 				   ((:camel-case)
-				    "~{ ~@/pithy-xml:camel/=\"~/pithy-xml:entity/\"~}>"))
+				    "~{ ~@/pithy-xml:camel/=\"~/pithy-xml:entity/\"~}>")
+				   ((:downcase)
+				    "~{ ~(~A~)=\"~/pithy-xml:entity/\"~}>"))
 			  attributes))
 		#+ignore (format stream "<~/pithy-xml:camel/~{ ~@/pithy-xml:camel/='~/pithy-xml:entity/'~}>"
 				 element
@@ -619,7 +623,8 @@ document."
       (with-input-from-string (stream document-stream-or-string)
 	(apply #'read-xml-document stream key-args))
       (multiple-value-bind (prependix prolog encoding)
-	  (let ((first-element (read-xml document-stream-or-string)))
+	  (let ((first-element (read-xml document-stream-or-string
+					 :default-namespace :keyword)))
 	    (if (typep first-element '(xml-element :?xml))
 		(values nil first-element (getf (cdar first-element) :encoding))
 		(values first-element nil nil)))
@@ -640,7 +645,7 @@ document."
 (defun read-xml (stream-or-string
 		 &key
 		 (type 'xml-element)
-		 ((:default-namespace *default-namespace*) :keyword)
+		 ((:default-namespace *default-namespace*) *default-namespace*)
 		 ((:namespace-bindings *namespace-bindings*) *namespace-bindings*)
 		 prepend)
   "Read the first XML element from STREAM-OR-STRING that matches TYPE."
