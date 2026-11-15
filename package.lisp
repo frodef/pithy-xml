@@ -14,6 +14,7 @@
 	   #:*xml-acronyms*
 	   #:*default-set-external-format*
 	   #:*default-attribute-namespace*
+	   #:*default-namespace*
 	   #:xml-intern
 	   #:parse-xml-element
 	   #:map-elements
